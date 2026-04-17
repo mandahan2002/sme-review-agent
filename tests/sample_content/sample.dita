@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE concept PUBLIC "-//OASIS//DTD DITA Concept//EN" "concept.dtd">
+<concept id="sap_s4hana_purchase_order" xml:lang="en-US">
+  <title>Creating a Purchase Order in SAP ECC 6.0</title>
+  <shortdesc>
+    This topic describes how to create a standard purchase order using transaction ME21N
+    in SAP ECC 6.0 Materials Management.
+  </shortdesc>
+
+  <conbody>
+    <section id="overview">
+      <title>Overview</title>
+      <p>
+        Purchase orders in SAP ECC are created using the classic SAP GUI transaction ME21N.
+        The system automatically calculates taxes based on the tax code maintained in the
+        vendor master. This functionality has been available since SAP R/3 4.6C.
+      </p>
+      <p>
+        Note: SAP Business Suite users should ensure they are running ECC 6.0 Enhancement
+        Package 3 or higher for the features described in this topic.
+      </p>
+    </section>
+
+    <section id="prerequisites">
+      <title>Prerequisites</title>
+      <ul>
+        <li>Access to SAP GUI 7.10 or later</li>
+        <li>Authorization for transaction ME21N (object M_BEST_BSA)</li>
+        <li>Vendor master data maintained in transaction XK01</li>
+        <li>Material master data with purchasing view activated</li>
+        <li>Purchasing organization and purchasing group configured</li>
+      </ul>
+    </section>
+
+    <section id="procedure">
+      <title>Procedure</title>
+      <steps>
+        <step>
+          <cmd>Log on to SAP GUI and enter transaction code <userinput>ME21N</userinput> in the command field.</cmd>
+          <info>The Create Purchase Order screen opens.</info>
+        </step>
+        <step>
+          <cmd>In the <uicontrol>Vendor</uicontrol> field, enter the vendor number or use F4 to search.</cmd>
+        </step>
+        <step>
+          <cmd>Select the <uicontrol>Purchasing Org.</uicontrol> from the dropdown and enter the <uicontrol>Purch. Group</uicontrol>.</cmd>
+        </step>
+        <step>
+          <cmd>In the item overview area, enter the <uicontrol>Material</uicontrol> number, <uicontrol>Quantity</uicontrol>, and <uicontrol>Plant</uicontrol>.</cmd>
+          <info>
+            The system will propose the price from the last purchase order or info record.
+            Price conditions are determined using the pricing procedure XXXXXX.
+          </info>
+        </step>
+        <step>
+          <cmd>Click the <uicontrol>Save</uicontrol> button or press <uicontrol>Ctrl+S</uicontrol>.</cmd>
+          <result>A purchase order number is generated. Note this number for follow-up activities.</result>
+        </step>
+      </steps>
+    </section>
+
+    <section id="account_assignment">
+      <title>Account Assignment</title>
+      <p>
+        For cost center purchasing, select account assignment category <uicontrol>K</uicontrol>
+        and enter the cost center in the <uicontrol>Account Assignment</uicontrol> tab.
+        The G/L account is determined automatically from the valuation class in the material master.
+      </p>
+      <p>
+        Project-related purchasing uses account assignment category <uicontrol>P</uicontrol>
+        with a WBS element from PS (Project System).
+      </p>
+    </section>
+
+    <section id="follow_up">
+      <title>Follow-Up Activities</title>
+      <p>After saving the purchase order, you can:</p>
+      <ul>
+        <li>Print the purchase order using transaction <userinput>ME9F</userinput></li>
+        <li>Send by fax using the output condition type NEU</li>
+        <li>Create a goods receipt using transaction <userinput>MIGO</userinput></li>
+        <li>Monitor the purchase order in transaction <userinput>ME2M</userinput></li>
+      </ul>
+    </section>
+
+    <section id="troubleshooting">
+      <title>Troubleshooting</title>
+      <p>
+        If you receive the error message "No purchasing info record exists", you must first
+        create an info record using transaction ME11 before creating the purchase order.
+      </p>
+      <p>
+        Authorization errors typically indicate missing authorization object M_BEST_BSA.
+        Contact your Basis administrator to resolve authorization issues.
+      </p>
+    </section>
+  </conbody>
+</concept>
