@@ -19,6 +19,7 @@ from ..models.review import ReviewResult
 from ..parsers.base_parser import ParsedContent
 from ..parsers.dita_parser import DITAParser
 from ..parsers.html_parser import HTMLParser
+from ..tools.m365_search import m365_configured, search_m365
 from ..tools.web_search import search_web
 
 load_dotenv()
@@ -30,15 +31,22 @@ load_dotenv()
 _RESEARCH_SYSTEM = """\
 You are a technical fact-checker for SAP learning content.
 
-Your job is to search the web for information that will help verify the accuracy
-of SAP content under review.  Focus on:
-  • SAP Notes cited or implied (e.g. "SAP Note 1234567")
-  • Transaction codes (T-codes) and whether they have Fiori replacements in S/4HANA
-  • Product version status (e.g. SAP ECC end-of-maintenance dates)
-  • SAP Help documentation for the specific feature or procedure described
+You have access to two search tools:
+  • search_web   — searches the public internet (SAP Notes, SAP Help, product docs)
+  • search_m365  — searches the organization's Microsoft 365 content (SharePoint /
+                   OneDrive) for internal learning materials, style guides, and
+                   approved procedures (only available when M365 is configured)
 
-Be targeted: perform 2–4 high-value searches, then write a concise research summary
-(bullet points) that the reviewer can use to spot inaccuracies in the content.
+Your job is to gather information that helps verify the accuracy of SAP content
+under review.  Focus on:
+  • SAP Notes cited or implied (e.g. "SAP Note 1234567") → use search_web
+  • T-codes and whether they have Fiori replacements in S/4HANA → use search_web
+  • Product version / end-of-maintenance status → use search_web
+  • Whether an updated internal version of this content exists → use search_m365
+  • Related internal procedures or learning objectives → use search_m365
+
+Be targeted: perform 2–5 high-value searches across both tools, then write a
+concise research summary (bullet points) that the reviewer can use.
 """
 
 _REVIEW_SYSTEM = """\
@@ -87,31 +95,63 @@ Be thorough, specific, and constructive. Every issue and suggestion must be acti
 # Tool schema for Claude
 # ---------------------------------------------------------------------------
 
-_TOOLS: list[dict[str, Any]] = [
-    {
-        "name": "search_web",
-        "description": (
-            "Search the web for up-to-date information about SAP products, "
-            "SAP Notes, SAP transactions, SAP Fiori apps, or SAP Help documentation. "
-            "Use this to verify technical accuracy of the content being reviewed."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": (
-                        "Specific search query. "
-                        "Examples: 'SAP Note 3456789', "
-                        "'SAP S/4HANA ME21N Fiori replacement app', "
-                        "'SAP ECC 6.0 end of mainstream maintenance date'"
-                    ),
-                }
-            },
-            "required": ["query"],
+_TOOL_SEARCH_WEB: dict[str, Any] = {
+    "name": "search_web",
+    "description": (
+        "Search the public web for up-to-date information about SAP products, "
+        "SAP Notes, SAP transactions, SAP Fiori apps, or SAP Help documentation. "
+        "Use this to verify technical accuracy of the content being reviewed."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Specific search query. "
+                    "Examples: 'SAP Note 3456789', "
+                    "'SAP S/4HANA ME21N Fiori replacement app', "
+                    "'SAP ECC 6.0 end of mainstream maintenance date'"
+                ),
+            }
         },
-    }
-]
+        "required": ["query"],
+    },
+}
+
+_TOOL_SEARCH_M365: dict[str, Any] = {
+    "name": "search_m365",
+    "description": (
+        "Search the organization's Microsoft 365 content (SharePoint, OneDrive) "
+        "for internal SAP learning materials, style guides, approved procedures, "
+        "or knowledge base articles. "
+        "Use this to find existing internal documents related to the content being reviewed — "
+        "e.g. check if an updated version exists, or find related learning objectives."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Keyword search query for organizational content. "
+                    "Examples: 'SAP Purchase Order procedure S/4HANA', "
+                    "'MM certification learning objectives', "
+                    "'Fiori app ME21N training guide'"
+                ),
+            }
+        },
+        "required": ["query"],
+    },
+}
+
+
+def _build_tools() -> list[dict[str, Any]]:
+    """Return tool list, adding M365 only when credentials are configured."""
+    tools = [_TOOL_SEARCH_WEB]
+    if m365_configured():
+        tools.append(_TOOL_SEARCH_M365)
+    return tools
 
 # ---------------------------------------------------------------------------
 # Format detection
@@ -185,15 +225,16 @@ def _research_phase(
     )
 
     messages: list[dict[str, Any]] = [{"role": "user", "content": research_prompt}]
+    tools = _build_tools()
 
     try:
-        for _ in range(8):  # safety cap — max ~4 search round-trips
+        for _ in range(10):  # safety cap — max ~5 search round-trips
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=3_000,
                 system=_RESEARCH_SYSTEM,
                 messages=messages,
-                tools=_TOOLS,
+                tools=tools,
             )
 
             if resp.stop_reason == "end_turn":
@@ -203,16 +244,22 @@ def _research_phase(
             if resp.stop_reason == "tool_use":
                 tool_results: list[dict[str, Any]] = []
                 for block in resp.content:
-                    if block.type == "tool_use" and block.name == "search_web":
-                        query = block.input.get("query", "")
+                    if block.type != "tool_use":
+                        continue
+                    query = block.input.get("query", "")
+                    if block.name == "search_web":
                         result = search_web(query)
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": result[:2_500],
-                            }
-                        )
+                    elif block.name == "search_m365":
+                        result = search_m365(query)
+                    else:
+                        result = f"[Unknown tool: {block.name}]"
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result[:2_500],
+                        }
+                    )
 
                 messages.append({"role": "assistant", "content": resp.content})
                 messages.append({"role": "user", "content": tool_results})
@@ -240,7 +287,7 @@ def _review_phase(
     )
 
     research_block = (
-        f"\n\n---\n\n**Web Research Findings** (use these to verify accuracy):\n\n"
+        f"\n\n---\n\n**Research Findings** (web + M365 internal content — use to verify accuracy):\n\n"
         f"{research_summary}"
         if research_summary
         else ""
