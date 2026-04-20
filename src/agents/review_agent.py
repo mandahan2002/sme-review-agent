@@ -20,6 +20,7 @@ from ..parsers.base_parser import ParsedContent
 from ..parsers.dita_parser import DITAParser
 from ..parsers.html_parser import HTMLParser
 from ..tools.m365_search import m365_configured, search_m365
+from ..tools.sap_help_search import search_sap_help
 from ..tools.web_search import search_web
 
 load_dotenv()
@@ -31,22 +32,27 @@ load_dotenv()
 _RESEARCH_SYSTEM = """\
 You are a technical fact-checker for SAP learning content.
 
-You have access to two search tools:
-  • search_web   — searches the public internet (SAP Notes, SAP Help, product docs)
-  • search_m365  — searches the organization's Microsoft 365 content (SharePoint /
-                   OneDrive) for internal learning materials, style guides, and
-                   approved procedures (only available when M365 is configured)
+You have access to these search tools:
+  • search_sap_help — searches official SAP Help Portal (help.sap.com) for product
+                      documentation, procedural guides, Fiori app guides, release notes
+  • search_web      — searches the public internet for SAP Notes, community answers,
+                      blog posts, and information not on help.sap.com
+  • search_m365     — searches the organization's SharePoint / OneDrive for internal
+                      learning materials and approved procedures
+                      (only available when M365 credentials are configured)
 
 Your job is to gather information that helps verify the accuracy of SAP content
 under review.  Focus on:
-  • SAP Notes cited or implied (e.g. "SAP Note 1234567") → use search_web
-  • T-codes and whether they have Fiori replacements in S/4HANA → use search_web
+  • Current official procedure for the described task → use search_sap_help first
+  • Whether described T-codes have Fiori app replacements in S/4HANA → search_sap_help
+  • SAP Notes cited or implied → use search_web
   • Product version / end-of-maintenance status → use search_web
-  • Whether an updated internal version of this content exists → use search_m365
-  • Related internal procedures or learning objectives → use search_m365
+  • Related internal procedures or updated versions → use search_m365 (if available)
 
-Be targeted: perform 2–5 high-value searches across both tools, then write a
-concise research summary (bullet points) that the reviewer can use.
+Prefer search_sap_help for procedural accuracy checks — it returns authoritative
+SAP documentation.  Use search_web for supplementary info.
+
+Be targeted: 3–6 high-value searches, then write a concise bullet-point summary.
 """
 
 _REVIEW_SYSTEM = """\
@@ -146,9 +152,36 @@ _TOOL_SEARCH_M365: dict[str, Any] = {
 }
 
 
+_TOOL_SEARCH_SAP_HELP: dict[str, Any] = {
+    "name": "search_sap_help",
+    "description": (
+        "Search the official SAP Help Portal (help.sap.com) for product documentation, "
+        "procedural guides, configuration guides, and release notes. "
+        "Use this to look up current SAP procedures, Fiori app documentation, "
+        "S/4HANA feature guides, or verify whether a described process matches "
+        "the official SAP documentation."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Search query for SAP documentation. "
+                    "Examples: 'Create Purchase Order S/4HANA Fiori', "
+                    "'ME21N transaction S/4HANA', "
+                    "'SAP MM goods receipt procedure'"
+                ),
+            }
+        },
+        "required": ["query"],
+    },
+}
+
+
 def _build_tools() -> list[dict[str, Any]]:
-    """Return tool list, adding M365 only when credentials are configured."""
-    tools = [_TOOL_SEARCH_WEB]
+    """Return tool list; M365 added only when credentials are configured."""
+    tools = [_TOOL_SEARCH_WEB, _TOOL_SEARCH_SAP_HELP]
     if m365_configured():
         tools.append(_TOOL_SEARCH_M365)
     return tools
@@ -249,6 +282,8 @@ def _research_phase(
                     query = block.input.get("query", "")
                     if block.name == "search_web":
                         result = search_web(query)
+                    elif block.name == "search_sap_help":
+                        result = search_sap_help(query)
                     elif block.name == "search_m365":
                         result = search_m365(query)
                     else:
